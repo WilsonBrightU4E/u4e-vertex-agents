@@ -11,7 +11,7 @@ app.use(express.json());
 // Initialize Google Cloud Services
 const PROJECT_ID = 'ardent-particle-382720';
 const vertexAi = new VertexAI({ project: PROJECT_ID, location: 'us-central1' });
-const firestore = new Firestore({ projectId: PROJECT_ID });
+const firestore = new Firestore({ projectId: PROJECT_ID, databaseId: 'u4e-students' });
 
 // Philip's Credentials (App Password)
 const EMAIL_ACCOUNT = 'Philip@u4education.com';
