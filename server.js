@@ -20,7 +20,8 @@ const APP_PASSWORD = 'foqu njhn vwsd dflo'; // Codex user will replace this
 // Set up the Email Sender (SMTP)
 const transporter = nodemailer.createTransport({
     service: 'gmail',
-    auth: { user: EMAIL_ACCOUNT, pass: APP_PASSWORD }
+    auth: { user: EMAIL_ACCOUNT, pass: APP_PASSWORD },
+    tls: { rejectUnauthorized: false }
 });
 
 // 1. The Admin UI Route
@@ -67,6 +68,7 @@ app.post('/check-emails', async (req, res) => {
             host: 'imap.gmail.com',
             port: 993,
             tls: true,
+            tlsOptions: { rejectUnauthorized: false },
             authTimeout: 30000
         }
     };
