@@ -1,175 +1,91 @@
-const express = require("express");
-const { SchemaType, VertexAI } = require("@google-cloud/vertexai");
+const express = require('express');
+const { VertexAI } = require('@google-cloud/vertexai');
 
 const app = express();
-const port = 8080;
-
-const vertexAI = new VertexAI({
-  project: "ardent-particle-382720",
-  location: "us-central1"
-});
-
-const generativeModel = vertexAI.getGenerativeModel({
-  model: "gemini-1.5-pro",
-  systemInstruction: {
-    role: "system",
-    parts: [
-      {
-        text: "You are Nia, the Master Educational Architect for U4Education. Create warm, culturally grounded mini-lessons for African children. Always follow the requested JSON schema exactly."
-      }
-    ]
-  },
-  generationConfig: {
-    temperature: 0.7,
-    maxOutputTokens: 1024,
-    responseMimeType: "application/json",
-    responseSchema: {
-      type: SchemaType.OBJECT,
-      required: ["lesson_title", "snippets"],
-      properties: {
-        lesson_title: {
-          type: SchemaType.STRING
-        },
-        snippets: {
-          type: SchemaType.ARRAY,
-          items: {
-            type: SchemaType.OBJECT,
-            required: ["spoken_script", "visual_prompt"],
-            properties: {
-              spoken_script: {
-                type: SchemaType.STRING
-              },
-              visual_prompt: {
-                type: SchemaType.STRING
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-});
-
-app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-app.get("/", (_req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>U4E Vertex Agents</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            background: #f4f6fb;
-          }
-          main {
-            width: min(480px, 92vw);
-            background: #ffffff;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
-          }
-          h1 {
-            margin-top: 0;
-          }
-          form {
-            display: grid;
-            gap: 1rem;
-          }
-          input,
-          button {
-            font: inherit;
-            padding: 0.8rem 1rem;
-          }
-          button {
-            border: 0;
-            border-radius: 8px;
-            background: #1d4ed8;
-            color: #ffffff;
-            cursor: pointer;
-          }
-        </style>
-      </head>
-      <body>
-        <main>
-          <h1>Generate Agent Request</h1>
-          <form method="post" action="/generate">
-            <label for="topic">Topic</label>
-            <input id="topic" name="topic" type="text" placeholder="Enter a topic" required />
-            <button type="submit">Generate</button>
-          </form>
-        </main>
-      </body>
-    </html>
-  `);
+// Initialize Vertex AI with the exact project ID
+const vertexAi = new VertexAI({ project: 'ardent-particle-382720', location: 'us-central1' });
+
+// 1. The User Interface Route
+app.get('/', (req, res) => {
+    res.send(`
+        <html>
+            <body style="font-family: Arial; padding: 40px; background: #f4f4f9;">
+                <div style="max-width: 600px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                    <h1 style="color: #333;">Nia: AI Architect</h1>
+                    <label style="font-weight: bold;">Topic</label><br>
+                    <input type="text" id="topic" value="climate change" style="width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 20px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
+                    <button onclick="generate()" style="background: #0d52bf; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold;">Generate Lesson</button>
+                    
+                    <div id="status" style="margin-top: 20px; color: #333; white-space: pre-wrap; font-family: monospace; background: #eee; padding: 15px; border-radius: 5px; display: none; border: 1px solid #ccc;"></div>
+                </div>
+                <script>
+                    async function generate() {
+                        const topic = document.getElementById('topic').value;
+                        const status = document.getElementById('status');
+                        const btn = document.querySelector('button');
+                        
+                        btn.disabled = true;
+                        status.style.display = 'block';
+                        status.innerHTML = "⏳ Nia is architecting the lesson... (Takes about 10-15 seconds)";
+                        
+                        try {
+                            const response = await fetch('/generate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ topic })
+                            });
+                            const data = await response.json();
+                            
+                            // Display the exact output or error on the screen
+                            status.innerHTML = JSON.stringify(data, null, 2);
+                        } catch (e) {
+                            status.innerHTML = "❌ Network Error: " + e.message;
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    }
+                </script>
+            </body>
+        </html>
+    `);
 });
 
-function extractResponseText(response) {
-  const part = response?.candidates?.[0]?.content?.parts?.find(
-    (candidatePart) => typeof candidatePart.text === "string"
-  );
+// 2. The AI Generation Route
+app.post('/generate', async (req, res) => {
+    try {
+        const { topic } = req.body;
+        
+        // Setup Gemini 1.5 Pro. The generationConfig forces pure JSON output to prevent crashing.
+        const generativeModel = vertexAi.getGenerativeModel({ 
+            model: 'gemini-1.5-pro',
+            generationConfig: { responseMimeType: "application/json" } 
+        });
 
-  return part?.text || "";
-}
+        const prompt = `You are Nia, the Master Educational Architect for U4Education. 
+        Create a 3-snippet (30 second) lesson on "${topic}" for African children. Keep it relatable and clear.
+        Constraints: Spoken script MUST be 20-25 words. On-screen text 3-5 words.
+        Output ONLY valid JSON matching this exact schema:
+        { "lesson_title": "string", "snippets": [ { "id": 1, "spoken_script": "string", "on_screen_text": "string", "visual_prompt": "string" } ] }`;
 
-app.post("/generate", async (req, res) => {
-  const topic = typeof req.body?.topic === "string" ? req.body.topic.trim() : "";
+        const request = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+        const response = await generativeModel.generateContent(request);
+        const responseText = response.response.candidates[0].content.parts[0].text;
+        
+        // Parse and send the successful JSON back to the UI
+        res.json({ success: true, ai_blueprint: JSON.parse(responseText) });
 
-  if (!topic) {
-    return res.status(400).json({
-      error: "A topic is required."
-    });
-  }
-
-  const prompt = [
-    "Create a 3-snippet lesson for African children.",
-    `Topic: ${topic}.`,
-    "Each snippet must represent roughly 30 seconds of teaching.",
-    "Return strict JSON only.",
-    "Use a short lesson_title.",
-    "Return exactly 3 snippets.",
-    "For each snippet, provide:",
-    '- "spoken_script": exactly 20 words.',
-    '- "visual_prompt": a vivid image-generation prompt aligned to the spoken script.'
-  ].join(" ");
-
-  try {
-    const result = await generativeModel.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
-        }
-      ]
-    });
-
-    const responseText = extractResponseText(result.response);
-
-    if (!responseText) {
-      return res.status(502).json({
-        error: "Vertex AI returned an empty response."
-      });
+    } catch (error) {
+        console.error("AI GENERATION ERROR:", error);
+        // If it fails, send the EXACT error message to the website screen
+        res.status(500).json({ 
+            success: false, 
+            message: "The AI encountered an error.", 
+            exact_error: error.message || error.toString() 
+        });
     }
-
-    const lesson = JSON.parse(responseText);
-    return res.json(lesson);
-  } catch (error) {
-    console.error("Vertex AI generation failed:", error);
-
-    return res.status(500).json({
-      error: "Failed to generate lesson content."
-    });
-  }
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
