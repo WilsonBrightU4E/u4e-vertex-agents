@@ -1,7 +1,54 @@
 const express = require("express");
+const { SchemaType, VertexAI } = require("@google-cloud/vertexai");
 
 const app = express();
 const port = 8080;
+
+const vertexAI = new VertexAI({
+  project: "ardent-particle-382720",
+  location: "us-central1"
+});
+
+const generativeModel = vertexAI.getGenerativeModel({
+  model: "gemini-1.5-pro",
+  systemInstruction: {
+    role: "system",
+    parts: [
+      {
+        text: "You are Nia, the Master Educational Architect for U4Education. Create warm, culturally grounded mini-lessons for African children. Always follow the requested JSON schema exactly."
+      }
+    ]
+  },
+  generationConfig: {
+    temperature: 0.7,
+    maxOutputTokens: 1024,
+    responseMimeType: "application/json",
+    responseSchema: {
+      type: SchemaType.OBJECT,
+      required: ["lesson_title", "snippets"],
+      properties: {
+        lesson_title: {
+          type: SchemaType.STRING
+        },
+        snippets: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.OBJECT,
+            required: ["spoken_script", "visual_prompt"],
+            properties: {
+              spoken_script: {
+                type: SchemaType.STRING
+              },
+              visual_prompt: {
+                type: SchemaType.STRING
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+});
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -65,13 +112,62 @@ app.get("/", (_req, res) => {
   `);
 });
 
-app.post("/generate", (req, res) => {
-  const { topic } = req.body;
+function extractResponseText(response) {
+  const part = response?.candidates?.[0]?.content?.parts?.find(
+    (candidatePart) => typeof candidatePart.text === "string"
+  );
 
-  res.json({
-    success: true,
-    message: `Received topic: ${topic || "unknown"}. Connection test succeeded.`
-  });
+  return part?.text || "";
+}
+
+app.post("/generate", async (req, res) => {
+  const topic = typeof req.body?.topic === "string" ? req.body.topic.trim() : "";
+
+  if (!topic) {
+    return res.status(400).json({
+      error: "A topic is required."
+    });
+  }
+
+  const prompt = [
+    "Create a 3-snippet lesson for African children.",
+    `Topic: ${topic}.`,
+    "Each snippet must represent roughly 30 seconds of teaching.",
+    "Return strict JSON only.",
+    "Use a short lesson_title.",
+    "Return exactly 3 snippets.",
+    "For each snippet, provide:",
+    '- "spoken_script": exactly 20 words.',
+    '- "visual_prompt": a vivid image-generation prompt aligned to the spoken script.'
+  ].join(" ");
+
+  try {
+    const result = await generativeModel.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
+        }
+      ]
+    });
+
+    const responseText = extractResponseText(result.response);
+
+    if (!responseText) {
+      return res.status(502).json({
+        error: "Vertex AI returned an empty response."
+      });
+    }
+
+    const lesson = JSON.parse(responseText);
+    return res.json(lesson);
+  } catch (error) {
+    console.error("Vertex AI generation failed:", error);
+
+    return res.status(500).json({
+      error: "Failed to generate lesson content."
+    });
+  }
 });
 
 app.listen(port, () => {
