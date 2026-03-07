@@ -59,7 +59,7 @@ app.post('/generate', async (req, res) => {
         
         // Setup Gemini 1.5 Pro. The generationConfig forces pure JSON output to prevent crashing.
         const generativeModel = vertexAi.getGenerativeModel({ 
-            model: 'gemini-1.5-pro',
+            model: 'gemini-2.5-flash',
             generationConfig: { responseMimeType: "application/json" } 
         });
 
