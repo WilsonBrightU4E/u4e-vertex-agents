@@ -7,9 +7,13 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.0.0",
     "@google-cloud/storage": "^7.16.0",
     "@google-cloud/text-to-speech": "^6.1.0",
     "@google-cloud/vertexai": "^1.10.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.7.5",
+    "nodemailer": "^7.0.3"
   }
 }
