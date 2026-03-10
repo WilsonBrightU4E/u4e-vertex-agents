@@ -118,6 +118,25 @@ app.get('/mail-config-status', (_req, res) => {
     });
 });
 
+app.get('/mail-auth-check', async (_req, res) => {
+    try {
+        const transporter = getMailTransporter();
+        await transporter.verify();
+        return res.status(200).json({
+            status: 'Success',
+            philipEmail: PHILIP_EMAIL,
+            smtpVerified: true
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 'Error',
+            philipEmail: PHILIP_EMAIL,
+            smtpVerified: false,
+            cause: error && error.message ? error.message : String(error)
+        });
+    }
+});
+
 app.post('/send-emails', async (req, res) => {
     try {
         const emails = Array.isArray(req.body?.emails)
