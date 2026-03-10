@@ -109,6 +109,15 @@ app.get('/startup-status', (_req, res) => {
     });
 });
 
+app.get('/mail-config-status', (_req, res) => {
+    return res.status(200).json({
+        status: 'Success',
+        philipEmail: PHILIP_EMAIL,
+        philipAppPasswordPresent: Boolean(PHILIP_APP_PASSWORD),
+        mongoUriPresent: Boolean(MONGO_URI)
+    });
+});
+
 app.post('/send-emails', async (req, res) => {
     try {
         const emails = Array.isArray(req.body?.emails)
