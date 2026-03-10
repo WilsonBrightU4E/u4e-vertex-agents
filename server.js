@@ -15,6 +15,12 @@ const vertexAi = new VertexAI({ project: PROJECT_ID, location: 'us-central1' });
 const firestore = new Firestore({ projectId: PROJECT_ID, databaseId: 'u4e-students' });
 const MONGO_URI = String(process.env.MONGO_URI || '').trim();
 const ADMIN_EMAILS = ['wilson.bright@u4e.com'];
+const PHILIP_EMAIL = String(process.env.PHILIP_EMAIL || 'Philip@u4education.com').trim();
+const PHILIP_APP_PASSWORD = String(
+    process.env.PHILIP_APP_PASSWORD ||
+    process.env.PHILIP_EMAIL_PASS ||
+    ''
+).trim();
 const startupStatus = {
     mongoConnected: false,
     adminRecognized: false,
@@ -22,16 +28,17 @@ const startupStatus = {
     startupError: null
 };
 
-// Philip's Credentials (App Password)
-const EMAIL_ACCOUNT = 'Philip@u4education.com';
-const APP_PASSWORD = 'foqu njhn vwsd dflo'; // Codex user will replace this
+const getMailTransporter = () => {
+    if (!PHILIP_APP_PASSWORD) {
+        throw new Error('PHILIP_APP_PASSWORD is missing.');
+    }
 
-// Set up the Email Sender (SMTP)
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: EMAIL_ACCOUNT, pass: APP_PASSWORD },
-    tls: { rejectUnauthorized: false }
-});
+    return nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: PHILIP_EMAIL, pass: PHILIP_APP_PASSWORD },
+        tls: { rejectUnauthorized: false }
+    });
+};
 
 async function connectToMongo() {
     if (!MONGO_URI) {
@@ -102,12 +109,43 @@ app.get('/startup-status', (_req, res) => {
     });
 });
 
+app.post('/send-emails', async (req, res) => {
+    try {
+        const emails = Array.isArray(req.body?.emails)
+            ? req.body.emails.map((email) => String(email || '').trim()).filter(Boolean)
+            : [];
+        const message = String(
+            req.body?.message ||
+            'Hello Admins,\n\nWelcome to the new Vertex Management Dashboard. I am Philip, your AI assistant.\n\nBest,\nPhilip'
+        ).trim();
+
+        if (emails.length === 0) {
+            return res.status(400).json({ error: 'No emails provided in the request body' });
+        }
+
+        const transporter = getMailTransporter();
+        await transporter.sendMail({
+            from: `"Philip: AI Email Tutor" <${PHILIP_EMAIL}>`,
+            to: PHILIP_EMAIL,
+            bcc: emails.join(', '),
+            subject: 'Vertex Dashboard Introduction',
+            text: message
+        });
+
+        console.log(`Successfully sent emails to ${emails.length} admins.`);
+        return res.status(200).json({ success: true, message: 'Emails dispatched successfully' });
+    } catch (error) {
+        console.error('Philip failed to send emails:', error);
+        return res.status(500).json({ error: 'Internal server error while sending emails' });
+    }
+});
+
 // 2. The Core AI & Email Logic Route
 app.post('/check-emails', async (req, res) => {
     const config = {
         imap: {
-            user: EMAIL_ACCOUNT,
-            password: APP_PASSWORD,
+            user: PHILIP_EMAIL,
+            password: PHILIP_APP_PASSWORD,
             host: 'imap.gmail.com',
             port: 993,
             tls: true,
@@ -169,8 +207,8 @@ app.post('/check-emails', async (req, res) => {
             const replyText = aiResponse.response.candidates[0].content.parts[0].text;
 
             // 3. Email the reply back to the student
-            await transporter.sendMail({
-                from: '"Philip the Tutor" <' + EMAIL_ACCOUNT + '>',
+            await getMailTransporter().sendMail({
+                from: '"Philip the Tutor" <' + PHILIP_EMAIL + '>',
                 to: studentEmail,
                 subject: 'Re: Your Question for Philip',
                 text: replyText
