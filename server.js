@@ -137,7 +137,10 @@ app.post('/send-emails', async (req, res) => {
         return res.status(200).json({ success: true, message: 'Emails dispatched successfully' });
     } catch (error) {
         console.error('Philip failed to send emails:', error);
-        return res.status(500).json({ error: 'Internal server error while sending emails' });
+        return res.status(500).json({
+            error: 'Internal server error while sending emails',
+            cause: error && error.message ? error.message : String(error)
+        });
     }
 });
 
