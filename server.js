@@ -1,6 +1,7 @@
 const express = require('express');
 const { VertexAI } = require('@google-cloud/vertexai');
 const { Firestore } = require('@google-cloud/firestore');
+const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const imaps = require('imap-simple');
 const simpleParser = require('mailparser').simpleParser;
@@ -12,6 +13,8 @@ app.use(express.json());
 const PROJECT_ID = 'ardent-particle-382720';
 const vertexAi = new VertexAI({ project: PROJECT_ID, location: 'us-central1' });
 const firestore = new Firestore({ projectId: PROJECT_ID, databaseId: 'u4e-students' });
+const MONGO_URI = String(process.env.MONGO_URI || '').trim();
+const ADMIN_EMAILS = ['wilson.bright@u4e.com'];
 
 // Philip's Credentials (App Password)
 const EMAIL_ACCOUNT = 'Philip@u4education.com';
@@ -23,6 +26,27 @@ const transporter = nodemailer.createTransport({
     auth: { user: EMAIL_ACCOUNT, pass: APP_PASSWORD },
     tls: { rejectUnauthorized: false }
 });
+
+async function connectToMongo() {
+    if (!MONGO_URI) {
+        throw new Error('MONGO_URI is missing.');
+    }
+
+    await mongoose.connect(MONGO_URI);
+    console.log('SUCCESS: Connected to MongoDB!');
+}
+
+function runStartupAdminCheck() {
+    const testAdminEmail = 'wilson.bright@u4e.com';
+    const isRecognized = ADMIN_EMAILS.includes(testAdminEmail);
+
+    if (isRecognized) {
+        console.log('SUCCESS: Admin recognized!');
+        return;
+    }
+
+    console.log('ERROR: Admin not recognized.');
+}
 
 // 1. The Admin UI Route
 app.get('/', (req, res) => {
@@ -152,4 +176,16 @@ app.post('/check-emails', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Philip is alive on port ${PORT}`));
+
+async function startServer() {
+    try {
+        await connectToMongo();
+        runStartupAdminCheck();
+        app.listen(PORT, () => console.log(`Philip is alive on port ${PORT}`));
+    } catch (error) {
+        console.error('ERROR: Failed to start Philip service.', error);
+        process.exit(1);
+    }
+}
+
+startServer();
