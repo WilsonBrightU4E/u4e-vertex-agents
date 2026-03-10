@@ -15,6 +15,12 @@ const vertexAi = new VertexAI({ project: PROJECT_ID, location: 'us-central1' });
 const firestore = new Firestore({ projectId: PROJECT_ID, databaseId: 'u4e-students' });
 const MONGO_URI = String(process.env.MONGO_URI || '').trim();
 const ADMIN_EMAILS = ['wilson.bright@u4e.com'];
+const startupStatus = {
+    mongoConnected: false,
+    adminRecognized: false,
+    checkedAdminEmail: 'wilson.bright@u4e.com',
+    startupError: null
+};
 
 // Philip's Credentials (App Password)
 const EMAIL_ACCOUNT = 'Philip@u4education.com';
@@ -33,12 +39,14 @@ async function connectToMongo() {
     }
 
     await mongoose.connect(MONGO_URI);
+    startupStatus.mongoConnected = true;
     console.log('SUCCESS: Connected to MongoDB!');
 }
 
 function runStartupAdminCheck() {
     const testAdminEmail = 'wilson.bright@u4e.com';
     const isRecognized = ADMIN_EMAILS.includes(testAdminEmail);
+    startupStatus.adminRecognized = isRecognized;
 
     if (isRecognized) {
         console.log('SUCCESS: Admin recognized!');
@@ -81,6 +89,17 @@ app.get('/', (req, res) => {
             </body>
         </html>
     `);
+});
+
+app.get('/startup-status', (_req, res) => {
+    const ok = startupStatus.mongoConnected && startupStatus.adminRecognized && !startupStatus.startupError;
+    return res.status(ok ? 200 : 500).json({
+        status: ok ? 'Success' : 'Error',
+        mongoConnected: startupStatus.mongoConnected,
+        adminRecognized: startupStatus.adminRecognized,
+        checkedAdminEmail: startupStatus.checkedAdminEmail,
+        startupError: startupStatus.startupError
+    });
 });
 
 // 2. The Core AI & Email Logic Route
@@ -183,6 +202,7 @@ async function startServer() {
         runStartupAdminCheck();
         app.listen(PORT, () => console.log(`Philip is alive on port ${PORT}`));
     } catch (error) {
+        startupStatus.startupError = error && error.message ? error.message : String(error);
         console.error('ERROR: Failed to start Philip service.', error);
         process.exit(1);
     }
