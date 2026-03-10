@@ -114,6 +114,7 @@ app.post('/send-emails', async (req, res) => {
         const emails = Array.isArray(req.body?.emails)
             ? req.body.emails.map((email) => String(email || '').trim()).filter(Boolean)
             : [];
+        const subject = String(req.body?.subject || 'Vertex Dashboard Introduction').trim();
         const message = String(
             req.body?.message ||
             'Hello Admins,\n\nWelcome to the new Vertex Management Dashboard. I am Philip, your AI assistant.\n\nBest,\nPhilip'
@@ -128,7 +129,7 @@ app.post('/send-emails', async (req, res) => {
             from: `"Philip: AI Email Tutor" <${PHILIP_EMAIL}>`,
             to: PHILIP_EMAIL,
             bcc: emails.join(', '),
-            subject: 'Vertex Dashboard Introduction',
+            subject,
             text: message
         });
 
