@@ -49,6 +49,10 @@ const getVertexImageLocation = (model = '') => {
     }
     return isGeminiImageModel(model) ? 'global' : 'us-central1';
 };
+const getVertexApiOrigin = (location = '') =>
+    String(location || '').trim().toLowerCase() === 'global'
+        ? 'https://aiplatform.googleapis.com'
+        : `https://${location}-aiplatform.googleapis.com`;
 const sizeToAspectRatio = (size = '') => {
     const normalized = normalizeImageSize(size);
     switch (normalized) {
@@ -75,7 +79,7 @@ async function generateGeminiVertexImage({ model, prompt, size }) {
     const location = getVertexImageLocation(model);
     const accessToken = await getVertexAccessToken();
     const endpoint =
-        `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
+        `${getVertexApiOrigin(location)}/v1/projects/${projectId}` +
         `/locations/${location}/publishers/google/models/${model}:generateContent`;
     const response = await fetch(endpoint, {
         method: 'POST',
@@ -84,10 +88,10 @@ async function generateGeminiVertexImage({ model, prompt, size }) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            contents: {
+            contents: [{
                 role: 'USER',
                 parts: [{ text: prompt }]
-            },
+            }],
             generationConfig: {
                 responseModalities: ['TEXT', 'IMAGE'],
                 imageConfig: {
@@ -127,7 +131,7 @@ async function generateImagenVertexImage({ model, prompt }) {
     const location = getVertexImageLocation(model);
     const accessToken = await getVertexAccessToken();
     const endpoint =
-        `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
+        `${getVertexApiOrigin(location)}/v1/projects/${projectId}` +
         `/locations/${location}/publishers/google/models/${model}:predict`;
     const response = await fetch(endpoint, {
         method: 'POST',
