@@ -1,6 +1,7 @@
 const express = require('express');
 const { VertexAI } = require('@google-cloud/vertexai');
 const { Firestore } = require('@google-cloud/firestore');
+const { GoogleAuth } = require('google-auth-library');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const imaps = require('imap-simple');
@@ -13,6 +14,9 @@ app.use(express.json());
 const PROJECT_ID = 'ardent-particle-382720';
 const vertexAi = new VertexAI({ project: PROJECT_ID, location: 'us-central1' });
 const firestore = new Firestore({ projectId: PROJECT_ID, databaseId: 'u4e-students' });
+const vertexImageAuth = new GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/cloud-platform']
+});
 const MONGO_URI = String(process.env.MONGO_URI || '').trim();
 const ADMIN_EMAILS = ['wilson.bright@u4e.com'];
 const PHILIP_EMAIL = String(process.env.PHILIP_EMAIL || 'Philip@u4education.com').trim();
@@ -27,6 +31,133 @@ const startupStatus = {
     checkedAdminEmail: 'wilson.bright@u4e.com',
     startupError: null
 };
+
+const normalizeEmail = (value = '') => String(value || '').trim().toLowerCase();
+const normalizeImageModel = (value = '') => String(value || '').trim();
+const normalizeImageSize = (value = '') => String(value || '').trim();
+const isGeminiImageModel = (model = '') => /^gemini-/i.test(model);
+const getVertexImageProjectId = () =>
+    String(process.env.GOOGLE_CLOUD_PROJECT || PROJECT_ID).trim() || PROJECT_ID;
+const getVertexImageLocation = (model = '') => {
+    const configured = String(
+        process.env.VERTEX_IMAGE_LOCATION ||
+        process.env.GOOGLE_CLOUD_LOCATION ||
+        ''
+    ).trim();
+    if (configured) {
+        return configured;
+    }
+    return isGeminiImageModel(model) ? 'global' : 'us-central1';
+};
+const sizeToAspectRatio = (size = '') => {
+    const normalized = normalizeImageSize(size);
+    switch (normalized) {
+        case '1024x1024':
+        case '512x512':
+        case '256x256':
+        default:
+            return '1:1';
+    }
+};
+
+async function getVertexAccessToken() {
+    const client = await vertexImageAuth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+    if (!token) {
+        throw new Error('Vertex access token could not be resolved.');
+    }
+    return token;
+}
+
+async function generateGeminiVertexImage({ model, prompt, size }) {
+    const projectId = getVertexImageProjectId();
+    const location = getVertexImageLocation(model);
+    const accessToken = await getVertexAccessToken();
+    const endpoint =
+        `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
+        `/locations/${location}/publishers/google/models/${model}:generateContent`;
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: {
+                role: 'USER',
+                parts: [{ text: prompt }]
+            },
+            generationConfig: {
+                responseModalities: ['TEXT', 'IMAGE'],
+                imageConfig: {
+                    aspectRatio: sizeToAspectRatio(size)
+                }
+            }
+        })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(payload?.error?.message || payload?.message || `Gemini image generation failed with status ${response.status}`);
+    }
+
+    const parts = payload?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts) || parts.length === 0) {
+        throw new Error('Gemini image generation returned no content parts.');
+    }
+
+    const imagePart = parts.find((part) => part?.inlineData?.data || part?.inline_data?.data);
+    if (!imagePart) {
+        throw new Error('Gemini image generation returned no image data.');
+    }
+
+    const inlineData = imagePart.inlineData || imagePart.inline_data;
+    return {
+        base64: inlineData?.data,
+        mimeType: inlineData?.mimeType || inlineData?.mime_type || 'image/png',
+        text: parts
+            .map((part) => String(part?.text || '').trim())
+            .filter(Boolean)
+            .join('\n')
+    };
+}
+
+async function generateImagenVertexImage({ model, prompt }) {
+    const projectId = getVertexImageProjectId();
+    const location = getVertexImageLocation(model);
+    const accessToken = await getVertexAccessToken();
+    const endpoint =
+        `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}` +
+        `/locations/${location}/publishers/google/models/${model}:predict`;
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: {
+                sampleCount: 1
+            }
+        })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(payload?.error?.message || payload?.message || `Imagen generation failed with status ${response.status}`);
+    }
+
+    const prediction = Array.isArray(payload?.predictions) ? payload.predictions[0] : null;
+    if (!prediction?.bytesBase64Encoded) {
+        throw new Error('Imagen generation returned no image data.');
+    }
+
+    return {
+        base64: prediction.bytesBase64Encoded,
+        mimeType: prediction.mimeType || 'image/png',
+        text: String(prediction?.prompt || '').trim()
+    };
+}
 
 const getMailTransporter = () => {
     if (!PHILIP_APP_PASSWORD) {
@@ -137,6 +268,48 @@ app.get('/mail-auth-check', async (_req, res) => {
     }
 });
 
+app.post('/generate-image', async (req, res) => {
+    try {
+        const provider = String(req.body?.provider || 'google').trim().toLowerCase();
+        const model = normalizeImageModel(
+            req.body?.model ||
+            process.env.GOOGLE_IMAGE_MODEL ||
+            process.env.GEMINI_IMAGE_MODEL ||
+            'gemini-2.5-flash-image'
+        );
+        const prompt = String(req.body?.prompt || '').trim();
+        const size = normalizeImageSize(req.body?.size || '1024x1024');
+        const source = String(req.body?.source || 'unknown').trim();
+
+        if (provider !== 'google') {
+            return res.status(400).json({ error: `Unsupported provider "${provider}".` });
+        }
+        if (!prompt) {
+            return res.status(400).json({ error: 'Prompt is required.' });
+        }
+
+        const result = isGeminiImageModel(model)
+            ? await generateGeminiVertexImage({ model, prompt, size })
+            : await generateImagenVertexImage({ model, prompt, size });
+
+        return res.status(200).json({
+            success: true,
+            provider: 'google',
+            model,
+            source,
+            mimeType: result.mimeType,
+            base64: result.base64,
+            reviewerText: result.text || ''
+        });
+    } catch (error) {
+        console.error('Vertex image relay failed:', error);
+        return res.status(500).json({
+            error: 'Vertex image relay failed',
+            cause: error && error.message ? error.message : String(error)
+        });
+    }
+});
+
 app.post('/send-emails', async (req, res) => {
     try {
         const emails = Array.isArray(req.body?.emails)
@@ -153,16 +326,32 @@ app.post('/send-emails', async (req, res) => {
         }
 
         const transporter = getMailTransporter();
-        await transporter.sendMail({
-            from: `"Philip: AI Email Tutor" <${PHILIP_EMAIL}>`,
-            to: PHILIP_EMAIL,
-            bcc: emails.join(', '),
-            subject,
-            text: message
-        });
+        const uniqueEmails = Array.from(new Set(emails.map((email) => normalizeEmail(email)).filter(Boolean)));
+        let recipientCount = 0;
+        let skippedSelfCount = 0;
 
-        console.log(`Successfully sent emails to ${emails.length} admins.`);
-        return res.status(200).json({ success: true, message: 'Emails dispatched successfully' });
+        for (const recipientEmail of uniqueEmails) {
+            if (recipientEmail === normalizeEmail(PHILIP_EMAIL)) {
+                skippedSelfCount += 1;
+                continue;
+            }
+
+            await transporter.sendMail({
+                from: `"Philip: AI Email Tutor" <${PHILIP_EMAIL}>`,
+                to: recipientEmail,
+                subject,
+                text: message
+            });
+            recipientCount += 1;
+        }
+
+        console.log(`Successfully sent emails to ${recipientCount} recipients.`);
+        return res.status(200).json({
+            success: true,
+            message: 'Emails dispatched successfully',
+            recipientCount,
+            skippedSelfCount
+        });
     } catch (error) {
         console.error('Philip failed to send emails:', error);
         return res.status(500).json({
@@ -209,8 +398,13 @@ app.post('/check-emails', async (req, res) => {
             const idHeader = 'Imap-Id: ' + id + '\r\n';
             const mail = await simpleParser(idHeader + all.body);
             
-            const studentEmail = mail.from.value[0].address;
+            const studentEmail = normalizeEmail(mail.from?.value?.[0]?.address);
             const studentQuestion = mail.text;
+
+            if (!studentEmail || studentEmail === normalizeEmail(PHILIP_EMAIL)) {
+                actionsLog.push(`Skipped self-addressed or invalid inbound email for UID ${id}.`);
+                continue;
+            }
 
             // 1. Check Student Database Memory
             const studentRef = firestore.collection('students').doc(studentEmail);
