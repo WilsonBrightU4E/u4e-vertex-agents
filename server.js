@@ -324,6 +324,12 @@ app.post('/send-emails', async (req, res) => {
             req.body?.message ||
             'Hello Admins,\n\nWelcome to the new Vertex Management Dashboard. I am Philip, your AI assistant.\n\nBest,\nPhilip'
         ).trim();
+        const html = String(req.body?.html || '').trim();
+        const fromName = String(req.body?.fromName || 'Philip: AI Email Tutor')
+            .replace(/[\r\n"]/g, '')
+            .trim()
+            .slice(0, 120) || 'Philip: AI Email Tutor';
+        const replyTo = normalizeEmail(req.body?.replyTo || '');
 
         if (emails.length === 0) {
             return res.status(400).json({ error: 'No emails provided in the request body' });
@@ -341,10 +347,12 @@ app.post('/send-emails', async (req, res) => {
             }
 
             await transporter.sendMail({
-                from: `"Philip: AI Email Tutor" <${PHILIP_EMAIL}>`,
+                from: `"${fromName}" <${PHILIP_EMAIL}>`,
                 to: recipientEmail,
                 subject,
-                text: message
+                text: message,
+                ...(html ? { html } : {}),
+                ...(replyTo ? { replyTo } : {})
             });
             recipientCount += 1;
         }
